@@ -1,0 +1,4 @@
+mmcv>=2.1.0
+mmengine>=0.10.3
+mmdet>=3.3.0
+pyyaml>=6.0

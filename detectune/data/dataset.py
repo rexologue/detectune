@@ -36,6 +36,7 @@ class CocoSegmentationDataset(Dataset):
         id_to_name = {cat["id"]: cat["name"] for cat in cats}
         sorted_cat_ids = sorted(id_to_name.keys())
         self.cat_id_to_contiguous = {cat_id: idx for idx, cat_id in enumerate(sorted_cat_ids)}
+        self.contiguous_id_to_cat_id = {idx: cat_id for cat_id, idx in self.cat_id_to_contiguous.items()}
         self.id2label = {idx: id_to_name[cat_id] for idx, cat_id in enumerate(sorted_cat_ids)}
         self.label2id = {label: idx for idx, label in self.id2label.items()}
 

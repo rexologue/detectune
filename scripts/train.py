@@ -6,50 +6,29 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from mmengine.config import Config, DictAction
 from mmengine.runner import Runner
 
 from mmdet.utils import register_all_modules
 
+from _config_utils import infer_and_populate_classes, load_settings, propagate_data_root
 
-def _propagate_data_root(cfg: Config, data_root: str | None) -> None:
-    if data_root is None:
-        return
-    cfg.data_root = data_root
-
-    def _update_dataset(dataset: Dict[str, Any]) -> None:
-        dataset['data_root'] = data_root
-        if 'ann_file' in dataset:
-            dataset['ann_file'] = str(dataset['ann_file'])
-        if 'metainfo' not in dataset and hasattr(cfg, 'metainfo'):
-            dataset['metainfo'] = cfg.metainfo
-
-    for loader_key in ['train_dataloader', 'val_dataloader', 'test_dataloader']:
-        if loader_key not in cfg:
-            continue
-        dataloader = cfg[loader_key]
-        dataset_cfg = dataloader.get('dataset', dataloader)
-        if isinstance(dataset_cfg, dict):
-            _update_dataset(dataset_cfg)
-
-    for evaluator_key in ['val_evaluator', 'test_evaluator']:
-        if evaluator_key not in cfg:
-            continue
-        evaluator = cfg[evaluator_key]
-        if isinstance(evaluator, dict) and evaluator.get('ann_file'):
-            ann_path = Path(evaluator['ann_file'])
-            if not ann_path.is_absolute():
-                evaluator['ann_file'] = str(Path(data_root) / ann_path)
+DEFAULT_CONFIG = 'configs/custom_dataset/faster-rcnn_r50_fpn_custom.py'
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         '--config',
-        default='configs/custom_dataset/faster-rcnn_r50_fpn_custom.py',
+        default=DEFAULT_CONFIG,
         help='Path to the MMDetection config file.',
+    )
+    parser.add_argument(
+        '--settings',
+        default=None,
+        help='Optional YAML file with defaults for config, data_root, work_dir, etc.',
     )
     parser.add_argument(
         '--work-dir',
@@ -76,21 +55,45 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _select_value(cli_value: Any, default: Any, settings: dict, key: str) -> Any:
+    if cli_value is not None and cli_value != default:
+        return cli_value
+    if key in settings:
+        return settings[key]
+    return cli_value if cli_value is not None else default
+
+
 def main() -> None:
     args = parse_args()
 
-    cfg = Config.fromfile(args.config)
+    settings = load_settings(args.settings)
+
+    config_path = _select_value(args.config, DEFAULT_CONFIG, settings, 'config')
+    work_dir = _select_value(args.work_dir, None, settings, 'work_dir')
+    data_root = _select_value(args.data_root, None, settings, 'data_root')
+
+    auto_resume = args.auto_resume or bool(settings.get('auto_resume', False))
+
+    cfg = Config.fromfile(config_path)
+
+    if 'cfg_options' in settings:
+        cfg_options = settings['cfg_options']
+        if not isinstance(cfg_options, dict):
+            raise TypeError('cfg_options in the settings file must be a mapping.')
+        cfg.merge_from_dict(cfg_options)
+
     if args.cfg_options:
         cfg.merge_from_dict(args.cfg_options)
 
-    if args.work_dir:
-        cfg.work_dir = args.work_dir
+    if work_dir:
+        cfg.work_dir = work_dir
     elif not cfg.get('work_dir'):
-        cfg.work_dir = os.path.join('work_dirs', Path(args.config).stem)
+        cfg.work_dir = os.path.join('work_dirs', Path(config_path).stem)
 
-    cfg.auto_resume = args.auto_resume
+    cfg.auto_resume = auto_resume
 
-    _propagate_data_root(cfg, args.data_root)
+    propagate_data_root(cfg, data_root)
+    infer_and_populate_classes(cfg)
 
     register_all_modules(init_default_scope=False)
 

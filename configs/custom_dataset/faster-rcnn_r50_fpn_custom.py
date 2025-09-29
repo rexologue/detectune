@@ -2,14 +2,9 @@ _base_ = 'mmdet::faster-rcnn/faster-rcnn_r50_fpn_1x_coco.py'
 
 default_scope = 'mmdet'
 
-data_root = 'data/coco/'
+data_root = 'data/trees_diseases/'
 
-metainfo = dict(
-    classes=(
-        'class1',
-        'class2',
-    ),
-)
+metainfo = dict(classes=())
 
 backend_args = None
 
@@ -43,7 +38,7 @@ train_dataloader = dict(
     dataset=dict(
         type='CocoDataset',
         data_root=data_root,
-        ann_file='annotations/train.json',
+        ann_file='train/_annotations.coco.json',
         data_prefix=dict(img='train/'),
         filter_cfg=dict(filter_empty_gt=True, min_size=32),
         pipeline=train_pipeline,
@@ -61,8 +56,8 @@ val_dataloader = dict(
         type='CocoDataset',
         test_mode=True,
         data_root=data_root,
-        ann_file='annotations/val.json',
-        data_prefix=dict(img='val/'),
+        ann_file='valid/_annotations.coco.json',
+        data_prefix=dict(img='valid/'),
         pipeline=val_pipeline,
         metainfo=metainfo,
     ),
@@ -78,7 +73,7 @@ test_dataloader = dict(
         type='CocoDataset',
         test_mode=True,
         data_root=data_root,
-        ann_file='annotations/test.json',
+        ann_file='test/_annotations.coco.json',
         data_prefix=dict(img='test/'),
         pipeline=test_pipeline,
         metainfo=metainfo,
@@ -116,14 +111,14 @@ test_cfg = dict(type='TestLoop')
 
 val_evaluator = dict(
     type='CocoMetric',
-    ann_file=data_root + 'annotations/val.json',
+    ann_file=data_root + 'valid/_annotations.coco.json',
     metric=['bbox'],
     format_only=False,
 )
 
 test_evaluator = dict(
     type='CocoMetric',
-    ann_file=data_root + 'annotations/test.json',
+    ann_file=data_root + 'test/_annotations.coco.json',
     metric=['bbox'],
     format_only=False,
 )

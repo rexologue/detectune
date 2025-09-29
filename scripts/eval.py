@@ -6,42 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Dict
 
 from mmengine.config import Config, DictAction
 from mmengine.runner import Runner
 
 from mmdet.utils import register_all_modules
 
-
-def _propagate_data_root(cfg: Config, data_root: str | None) -> None:
-    if data_root is None:
-        return
-    cfg.data_root = data_root
-
-    def _update_dataset(dataset: Dict[str, Any]) -> None:
-        dataset['data_root'] = data_root
-        if 'ann_file' in dataset:
-            dataset['ann_file'] = str(dataset['ann_file'])
-        if 'metainfo' not in dataset and hasattr(cfg, 'metainfo'):
-            dataset['metainfo'] = cfg.metainfo
-
-    for loader_key in ['val_dataloader', 'test_dataloader']:
-        if loader_key not in cfg:
-            continue
-        dataloader = cfg[loader_key]
-        dataset_cfg = dataloader.get('dataset', dataloader)
-        if isinstance(dataset_cfg, dict):
-            _update_dataset(dataset_cfg)
-
-    for evaluator_key in ['val_evaluator', 'test_evaluator']:
-        if evaluator_key not in cfg:
-            continue
-        evaluator = cfg[evaluator_key]
-        if isinstance(evaluator, dict) and evaluator.get('ann_file'):
-            ann_path = Path(evaluator['ann_file'])
-            if not ann_path.is_absolute():
-                evaluator['ann_file'] = str(Path(data_root) / ann_path)
+from _config_utils import infer_and_populate_classes, load_settings, propagate_data_root
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,6 +26,11 @@ def parse_args() -> argparse.Namespace:
         '--checkpoint',
         required=True,
         help='Checkpoint file to evaluate.',
+    )
+    parser.add_argument(
+        '--settings',
+        default=None,
+        help='Optional YAML file to provide data_root, work_dir, or cfg_options defaults.',
     )
     parser.add_argument(
         '--data-root',
@@ -85,17 +61,30 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    settings = load_settings(args.settings)
+
+    data_root = args.data_root or settings.get('data_root')
+    work_dir = args.work_dir or settings.get('work_dir')
+
     cfg = Config.fromfile(args.config)
+
+    if 'cfg_options' in settings:
+        cfg_options = settings['cfg_options']
+        if not isinstance(cfg_options, dict):
+            raise TypeError('cfg_options in the settings file must be a mapping.')
+        cfg.merge_from_dict(cfg_options)
+
     if args.cfg_options:
         cfg.merge_from_dict(args.cfg_options)
 
-    if args.work_dir:
-        eval_dir = Path(args.work_dir)
+    if work_dir:
+        eval_dir = Path(work_dir)
     else:
         eval_dir = Path(args.checkpoint).resolve().parent
     eval_dir.mkdir(parents=True, exist_ok=True)
 
-    _propagate_data_root(cfg, args.data_root)
+    propagate_data_root(cfg, data_root)
+    infer_and_populate_classes(cfg)
 
     register_all_modules(init_default_scope=False)
 

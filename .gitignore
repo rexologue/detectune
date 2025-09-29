@@ -8,3 +8,7 @@ __pycache__/
 .venv/
 work_dirs/
 outputs/
+
+configs/*
+!configs/default.yaml
+!configs/

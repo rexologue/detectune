@@ -14,7 +14,7 @@ import torch
 @dataclass
 class CheckpointState:
     epoch: int
-    monitor_value: float
+    monitor_value: Optional[float]
     path: Path
 
 
@@ -42,7 +42,9 @@ class CheckpointManager:
         self._best_state: Optional[CheckpointState] = None
         self._history: list[CheckpointState] = []
 
-    def _is_improvement(self, value: float) -> bool:
+    def _is_improvement(self, value: Optional[float]) -> bool:
+        if value is None:
+            return False
         if self._best_state is None:
             return True
         if self.mode == "min":
@@ -56,7 +58,7 @@ class CheckpointManager:
         processor,
         optimizer,
         scheduler,
-        monitor_value: float,
+        monitor_value: Optional[float],
     ) -> Path:
         checkpoint_dir = self.directory / f"epoch_{epoch:04d}"
         checkpoint_dir.mkdir(parents=True, exist_ok=True)

@@ -26,8 +26,8 @@ configuration-first philosophy while targeting MaskDINO use-cases.
 
 - **Training engine** for MaskDINO models powered by PyTorch + Hugging Face
   Transformers.
-- **Checkpoint management** with epoch-based checkpoints and automatic best-model
-  tracking.
+- **Checkpoint management** with epoch-based checkpoints and configurable
+  best-model tracking.
 - **Experiment tracking with Neptune**, mirroring the ergonomics of the
   `vit_tune` Neptune logger.
 
@@ -69,8 +69,26 @@ python train.py --config configs/default.yaml
 The trainer will download the requested MaskDINO checkpoint into the configured
 `models_dir`, start logging to Neptune if enabled, and save checkpoints within
 `checkpointing.dir` every `checkpointing.save_every_n_epochs` epochs. The best
-model (based on validation loss) is stored under
-`checkpointing.dir/best`.
+model is stored under `checkpointing.dir/best` according to the metric selected
+via `checkpointing.monitor` (for example `val_loss`, `valid.detection.mAP`, or
+`valid.classification.overall_accuracy`).
+
+### Choosing the best checkpoint metric
+
+The checkpoint configuration accepts any metric reported during training. Keys
+use dot notation and are automatically generated for nested metrics:
+
+- `train.loss`
+- `valid.loss` (also exposed as `val_loss` / `valid_loss` for backwards compatibility)
+- `valid.detection.mAP`, `valid.detection.mAP50`, `valid.detection.mAP75`, `valid.detection.mean_recall`
+- `valid.classification.overall_accuracy`
+- `valid.classification.per_class_accuracy.<CLASS_NAME>` (class names are normalized
+  by replacing spaces with underscores and `/` with `-`)
+
+Set `checkpointing.monitor` to any of these keys to control how the best model is
+selected. When a chosen metric is unavailable for a given epoch (for example,
+when evaluation is skipped), the checkpoint is still saved but the best-model
+selection will wait until the metric becomes available.
 
 ### Repository Layout
 

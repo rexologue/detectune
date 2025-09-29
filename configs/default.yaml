@@ -29,7 +29,7 @@ training:
 checkpointing:
   dir: ./checkpoints
   save_every_n_epochs: 1
-  monitor: val_loss
+  monitor: val_loss  # e.g. "valid.detection.mAP" or "valid.classification.overall_accuracy"
   mode: min
   keep_last_n: 3
 

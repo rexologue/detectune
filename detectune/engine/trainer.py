@@ -58,6 +58,73 @@ class Trainer:
         self.state = TrainState()
         self.model.to(self.device)
 
+    @staticmethod
+    def _sanitize_metric_name(name: str) -> str:
+        """Normalize metric keys to be filesystem- and logger-friendly."""
+
+        return name.replace("/", "-").replace(" ", "_")
+
+    def _flatten_metrics(self, metrics: Dict[str, Any], prefix: str = "") -> Dict[str, float]:
+        """Flatten nested metric dictionaries into dot-delimited keys."""
+
+        flat: Dict[str, float] = {}
+        for key, value in metrics.items():
+            key_path = f"{prefix}{key}" if not prefix else f"{prefix}.{key}"
+            if isinstance(value, dict):
+                flat.update(self._flatten_metrics(value, key_path))
+            else:
+                try:
+                    flat[key_path] = float(value)
+                except (TypeError, ValueError):
+                    continue
+        return flat
+
+    def _prepare_epoch_metrics(
+        self,
+        train_loss: float,
+        val_loss: Optional[float],
+        val_metrics: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Aggregate train/validation metrics into a structured dictionary."""
+
+        epoch_metrics: Dict[str, Any] = {"train": {"loss": train_loss}}
+
+        if val_loss is not None or val_metrics is not None:
+            epoch_metrics.setdefault("valid", {})
+
+        if val_loss is not None:
+            epoch_metrics["valid"]["loss"] = val_loss
+
+        if val_metrics is None:
+            return epoch_metrics
+
+        detection_metrics = val_metrics.get("detection")
+        if isinstance(detection_metrics, dict) and detection_metrics:
+            epoch_metrics["valid"]["detection"] = {
+                self._sanitize_metric_name(name): value
+                for name, value in detection_metrics.items()
+            }
+
+        classification_metrics = val_metrics.get("classification")
+        if isinstance(classification_metrics, dict) and classification_metrics:
+            valid_classification: Dict[str, Any] = {}
+
+            overall_accuracy = classification_metrics.get("overall_accuracy")
+            if overall_accuracy is not None:
+                valid_classification["overall_accuracy"] = overall_accuracy
+
+            per_class_accuracy = classification_metrics.get("per_class_accuracy")
+            if isinstance(per_class_accuracy, dict) and per_class_accuracy:
+                valid_classification["per_class_accuracy"] = {
+                    self._sanitize_metric_name(class_name): accuracy
+                    for class_name, accuracy in per_class_accuracy.items()
+                }
+
+            if valid_classification:
+                epoch_metrics["valid"]["classification"] = valid_classification
+
+        return epoch_metrics
+
     def _move_to_device(self, batch: Dict[str, torch.Tensor]):
         def move(value):
             if isinstance(value, torch.Tensor):
@@ -166,8 +233,20 @@ class Trainer:
                             metric_values.append(accuracy)
                         self.logger.save_metrics("valid", metric_names, metric_values, step=self.state.global_step)
 
+            epoch_metrics = self._prepare_epoch_metrics(train_loss, val_loss, val_metrics)
+            flattened_metrics = self._flatten_metrics(epoch_metrics)
+            # Backwards compatibility aliases
+            if "train.loss" in flattened_metrics:
+                flattened_metrics.setdefault("train_loss", flattened_metrics["train.loss"])
+            if "valid.loss" in flattened_metrics:
+                flattened_metrics.setdefault("val_loss", flattened_metrics["valid.loss"])
+                flattened_metrics.setdefault("valid_loss", flattened_metrics["valid.loss"])
+
             if self.checkpoint_manager is not None and ((epoch + 1) % self.save_every_n_epochs == 0):
-                monitor_value = val_loss if val_loss is not None else train_loss
+                monitor_key = self.checkpoint_manager.monitor
+                monitor_value = flattened_metrics.get(monitor_key)
+                if monitor_value is None and monitor_key in {"val_loss", "valid.loss", "valid_loss"}:
+                    monitor_value = flattened_metrics.get("train.loss")
                 self.checkpoint_manager.save_checkpoint(
                     epoch=epoch + 1,
                     model=self.model,

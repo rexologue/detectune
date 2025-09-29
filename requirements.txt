@@ -1,4 +1,11 @@
-mmcv>=2.1.0
-mmengine>=0.10.3
-mmdet>=3.3.0
-pyyaml>=6.0
+albumentations>=1.4.0
+neptune>=1.7.0
+numpy>=1.23
+omegaconf>=2.3
+pycocotools>=2.0.7
+python-dotenv>=1.0
+PyYAML>=6.0
+torch>=2.2
+torchvision>=0.17
+transformers>=4.38
+tqdm>=4.66

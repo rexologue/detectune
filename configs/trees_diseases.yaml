@@ -1,0 +1,15 @@
+# High-level settings for training on the Trees Diseases dataset.
+config: configs/custom_dataset/faster-rcnn_r50_fpn_custom.py
+# Update this path to where you stored the dataset folder that contains
+# train/, valid/, and test/ with their respective _annotations.coco.json files.
+data_root: data/trees_diseases
+work_dir: work_dirs/trees_diseases_faster_rcnn
+auto_resume: true
+cfg_options:
+  train_dataloader:
+    batch_size: 4
+  optim_wrapper:
+    optimizer:
+      lr: 0.01
+  train_cfg:
+    max_epochs: 18

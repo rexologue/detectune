@@ -50,18 +50,21 @@ Place or symlink your dataset under a folder of your choice (e.g. `data/my_datas
 
 ```
 /path/to/dataset/
-├── annotations/
-│   ├── train.json
-│   └── val.json
-├── train/               # Training images
+├── train/
 │   ├── xxx.jpg
-│   └── ...
-└── val/                 # Validation images
+│   ├── ...
+│   └── _annotations.coco.json
+├── valid/
+│   ├── xxx.jpg
+│   ├── ...
+│   └── _annotations.coco.json
+└── test/
     ├── xxx.jpg
-    └── ...
+    ├── ...
+    └── _annotations.coco.json
 ```
 
-The configuration also looks for an optional `test.json`/`test/` pair when running evaluation or inference. Update the `metainfo` section in `configs/custom_dataset/faster-rcnn_r50_fpn_custom.py` so that the `classes` tuple matches your label names and ordering.
+The helper scripts now infer the class names directly from the training annotations, so you do not need to hard-code them in the config.
 
 ## Training
 
@@ -80,6 +83,14 @@ python scripts/train.py \
 - `--cfg-options` allows inline overrides, e.g. `--cfg-options train_dataloader.batch_size=4 optim_wrapper.optimizer.lr=0.01`.
 
 By default, automatic resume is disabled. Pass `--auto-resume` to continue from the latest checkpoint inside the work directory when training restarts.
+
+You can also store your preferred defaults in a YAML file and load them via `--settings`:
+
+```bash
+python scripts/train.py --settings configs/trees_diseases.yaml
+```
+
+The YAML file accepts the same keys as the CLI arguments (`config`, `data_root`, `work_dir`, `auto_resume`) plus a `cfg_options` mapping for nested overrides. See `configs/trees_diseases.yaml` for a ready-to-use example. CLI arguments still take precedence when provided.
 
 ## Evaluation
 

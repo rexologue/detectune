@@ -1,128 +1,99 @@
-# Detectune
+# Detectune MaskDINO Training Suite
 
-Tools and reference configuration for fine-tuning MMDetection models on custom datasets that follow the COCO detection format. The repository ships with:
+Detectune is a clean-room rewrite focused on fine-tuning [MaskDINO](https://huggingface.co/docs/transformers/model_doc/maskdino)
+models for instance and semantic segmentation. The project takes inspiration from
+[`vit_tune`](https://github.com/rexologue/vit_tune) and follows a similar
+configuration-first philosophy while targeting MaskDINO use-cases.
 
-- A ready-to-run Faster R-CNN configuration that plugs in a COCO-style dataset.
-- Lightweight training, evaluation, and hyper-parameter sweep scripts powered by MMEngine.
-- Documentation for preparing data, customizing experiments, and tracking runs.
+## Features
 
-The project keeps the moving parts that MMDetection expects (config, work directories, datasets) but trims the setup down so you can focus on iterating on the model.
+- **YAML-first configuration** for every experiment – from optimizer hyperparameters
+  to dataset, logging, and checkpointing options.
+- **Dataset processor** that validates Roboflow-style COCO exports with the following
+  directory structure:
 
-## Repository structure
+  ```
+  trees_diseases/
+  ├── README.dataset.txt
+  ├── README.roboflow.txt
+  ├── train/
+  │   └── _annotations.coco.json
+  ├── valid/
+  │   └── _annotations.coco.json
+  └── test/
+      └── _annotations.coco.json
+  ```
 
-```
-.
-├── configs/
-│   └── custom_dataset/
-│       └── faster-rcnn_r50_fpn_custom.py   # Base configuration you can extend.
-├── scripts/
-│   ├── eval.py                             # Evaluate a trained checkpoint.
-│   ├── train.py                            # Fine-tune using the provided config.
-│   └── tune.py                             # Run a simple grid search over hyper-parameters.
-├── tuning/
-│   └── search_space.yaml                   # Example hyper-parameter combinations.
-├── requirements.txt                        # Python package requirements.
-└── README.md
-```
+- **Training engine** for MaskDINO models powered by PyTorch + Hugging Face
+  Transformers.
+- **Checkpoint management** with epoch-based checkpoints and automatic best-model
+  tracking.
+- **Experiment tracking with Neptune**, mirroring the ergonomics of the
+  `vit_tune` Neptune logger.
 
-You are encouraged to fork the repository and keep your own experiment-specific configs inside `configs/` (e.g. `configs/<project>/<model>.py`).
+## Getting Started
 
-## Prerequisites
-
-- Python 3.9 or newer.
-- PyTorch with CUDA support that matches your GPU drivers. The requirements file assumes the official PyTorch wheels are already installed. If you do not have PyTorch installed yet, follow the instructions at [pytorch.org](https://pytorch.org/) before installing the rest of the dependencies.
-- A COCO-style dataset with `train`, `val`, and (optionally) `test` splits.
-
-## Installation
+### 1. Install dependencies
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-The requirements pull the latest stable MMDetection and MMEngine packages. If you prefer to pin exact versions for reproducibility, update `requirements.txt` accordingly.
+### 2. Configure your experiment
 
-## Dataset layout
+Update `configs/default.yaml` or create a copy for your run. The configuration file
+controls dataset paths, optimizer settings, Neptune logging, and checkpoint
+behaviour.
 
-Place or symlink your dataset under a folder of your choice (e.g. `data/my_dataset`). The expected structure mirrors the COCO layout used by MMDetection:
+### 3. Prepare the dataset metadata
 
-```
-/path/to/dataset/
-├── train/
-│   ├── xxx.jpg
-│   ├── ...
-│   └── _annotations.coco.json
-├── valid/
-│   ├── xxx.jpg
-│   ├── ...
-│   └── _annotations.coco.json
-└── test/
-    ├── xxx.jpg
-    ├── ...
-    └── _annotations.coco.json
-```
-
-The helper scripts now infer the class names directly from the training annotations, so you do not need to hard-code them in the config.
-
-## Training
-
-The minimal training command is:
+Validate a dataset directory and export label metadata using the dataset processor:
 
 ```bash
-python scripts/train.py \
-  --config configs/custom_dataset/faster-rcnn_r50_fpn_custom.py \
-  --data-root /path/to/dataset \
-  --work-dir work_dirs/faster_rcnn_baseline
+python scripts/prepare_dataset.py \
+  --dataset-dir /path/to/trees_diseases \
+  --output-labels configs/labels.yaml
 ```
 
-- `--config` points to any MMDetection config file.
-- `--data-root` overrides `data_root` inside the config so you can keep dataset paths out of version control.
-- `--work-dir` is where logs, checkpoints, and tensorboard summaries will be stored (`work_dirs/<config_name>` by default).
-- `--cfg-options` allows inline overrides, e.g. `--cfg-options train_dataloader.batch_size=4 optim_wrapper.optimizer.lr=0.01`.
+The processor checks folder integrity, reports basic statistics, and optionally
+writes the inferred `id2label` mapping that can be reused across experiments.
 
-By default, automatic resume is disabled. Pass `--auto-resume` to continue from the latest checkpoint inside the work directory when training restarts.
-
-You can also store your preferred defaults in a YAML file and load them via `--settings`:
+### 4. Launch training
 
 ```bash
-python scripts/train.py --settings configs/trees_diseases.yaml
+python train.py --config configs/default.yaml
 ```
 
-The YAML file accepts the same keys as the CLI arguments (`config`, `data_root`, `work_dir`, `auto_resume`) plus a `cfg_options` mapping for nested overrides. See `configs/trees_diseases.yaml` for a ready-to-use example. CLI arguments still take precedence when provided.
+The trainer will download the requested MaskDINO checkpoint into the configured
+`models_dir`, start logging to Neptune if enabled, and save checkpoints within
+`checkpointing.dir` every `checkpointing.save_every_n_epochs` epochs. The best
+model (based on validation loss) is stored under
+`checkpointing.dir/best`.
 
-## Evaluation
+### Repository Layout
 
-After training, evaluate a checkpoint on the validation split:
-
-```bash
-python scripts/eval.py \
-  --config configs/custom_dataset/faster-rcnn_r50_fpn_custom.py \
-  --checkpoint work_dirs/faster_rcnn_baseline/epoch_12.pth \
-  --data-root /path/to/dataset
+```
+configs/            # YAML experiment definitions
+scripts/            # CLI utilities (dataset processor, evaluation helpers)
+detectune/
+├── config.py       # Dataclasses + loader for experiment configuration
+├── data/           # Dataset utilities and dataloaders
+├── engine/         # Training and checkpointing logic
+├── logging/        # Neptune experiment logger
+├── models/         # MaskDINO model & processor factory
+└── utils/          # Helper functions (seeding, distributed helpers)
+train.py            # Single-entry training script
 ```
 
-The script prints the evaluation metrics to the terminal and saves them as JSON inside the work directory for easy experiment tracking.
+## Neptune Logging
 
-## Hyper-parameter sweeps
+Set `neptune.enabled: true` inside your config and provide either `api_token` or an
+environment variable `NEPTUNE_API_TOKEN`. Additional metadata such as custom tags
+or a run name can also be specified.
 
-`tune.py` implements a small grid-search utility that iterates over a YAML-defined search space. Edit `tuning/search_space.yaml` to your liking, then launch:
+## License
 
-```bash
-python scripts/tune.py \
-  --config configs/custom_dataset/faster-rcnn_r50_fpn_custom.py \
-  --data-root /path/to/dataset \
-  --search-space tuning/search_space.yaml \
-  --work-dir-base work_dirs/tuning_runs
-```
-
-Each configuration combination gets its own sub-directory under `work_dirs/tuning_runs`. Completed runs are skipped automatically when their checkpoint already exists, letting you resume interrupted sweeps.
-
-## Tips
-
-- Keep separate configs per experiment and inherit from the provided base to ensure consistency.
-- Track your GPU memory usage when bumping `batch_size`. Adjust `auto_scale_lr.base_batch_size` inside the config to enable automatic learning rate scaling.
-- Use TensorBoard (`tensorboard --logdir work_dirs`) or MMDetection's built-in visualization hooks to monitor training curves.
-
-Happy training!
+This project is distributed under the terms of the MIT License. See `LICENSE`
+for details.

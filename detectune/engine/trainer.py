@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 from torch.nn.utils import clip_grad_norm_
@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from detectune.engine.checkpoint import CheckpointManager
+from detectune.engine.metrics import CocoMetrics
 from detectune.logging import NullLogger
 
 
@@ -52,6 +53,7 @@ class Trainer:
         self.checkpoint_manager = checkpoint_manager
         self.log_every_n_steps = log_every_n_steps
         self.save_every_n_epochs = max(save_every_n_epochs, 1)
+        self.val_dataset = getattr(val_loader, "dataset", None) if val_loader is not None else None
 
         self.state = TrainState()
         self.model.to(self.device)
@@ -101,18 +103,29 @@ class Trainer:
         return running_loss / max(len(self.train_loader), 1)
 
     @torch.no_grad()
-    def evaluate(self) -> Optional[float]:
+    def evaluate(self) -> Tuple[Optional[float], Optional[Dict[str, Any]]]:
         if self.val_loader is None:
-            return None
+            return None, None
 
         self.model.eval()
         running_loss = 0.0
+        metrics_tracker = None
+        if self.val_dataset is not None:
+            metrics_tracker = CocoMetrics(
+                coco=self.val_dataset.coco,
+                contiguous_id_to_cat_id=self.val_dataset.contiguous_id_to_cat_id,
+                id2label=self.val_dataset.id2label,
+                processor=self.processor,
+            )
         for batch in self.val_loader:
             batch = self._move_to_device(batch)
             outputs = self.model(**batch)
             running_loss += outputs.loss.item()
+            if metrics_tracker is not None:
+                metrics_tracker.update(outputs, batch["labels"])
 
-        return running_loss / max(len(self.val_loader), 1)
+        metrics = metrics_tracker.compute() if metrics_tracker is not None else None
+        return running_loss / max(len(self.val_loader), 1), metrics
 
     def fit(self, num_epochs: int, eval_every_n_epochs: int = 1) -> None:
         for epoch in range(num_epochs):
@@ -121,10 +134,37 @@ class Trainer:
             self.logger.save_metrics("train", "epoch_loss", train_loss, step=self.state.global_step)
 
             val_loss = None
+            val_metrics = None
             if self.val_loader is not None and ((epoch + 1) % max(eval_every_n_epochs, 1) == 0):
-                val_loss = self.evaluate()
+                val_loss, val_metrics = self.evaluate()
                 if val_loss is not None:
                     self.logger.save_metrics("valid", "loss", val_loss, step=self.state.global_step)
+                if val_metrics is not None:
+                    detection_metrics = val_metrics.get("detection", {})
+                    if detection_metrics:
+                        names = [f"detection_{name}" for name in detection_metrics.keys()]
+                        values = list(detection_metrics.values())
+                        self.logger.save_metrics("valid", names, values, step=self.state.global_step)
+
+                    classification_metrics = val_metrics.get("classification", {})
+                    overall_accuracy = classification_metrics.get("overall_accuracy")
+                    if overall_accuracy is not None:
+                        self.logger.save_metrics(
+                            "valid",
+                            "classification_overall_accuracy",
+                            overall_accuracy,
+                            step=self.state.global_step,
+                        )
+
+                    per_class_accuracy = classification_metrics.get("per_class_accuracy", {})
+                    if per_class_accuracy:
+                        metric_names = []
+                        metric_values = []
+                        for class_name, accuracy in per_class_accuracy.items():
+                            safe_name = class_name.replace("/", "-").replace(" ", "_")
+                            metric_names.append(f"class_accuracy_{safe_name}")
+                            metric_values.append(accuracy)
+                        self.logger.save_metrics("valid", metric_names, metric_values, step=self.state.global_step)
 
             if self.checkpoint_manager is not None and ((epoch + 1) % self.save_every_n_epochs == 0):
                 monitor_value = val_loss if val_loss is not None else train_loss
